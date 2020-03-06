@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# USAGE:
+#  ./02_3dDeconvolve_062719.sh
+#  DRYRUN=1 ./02_3dDeconvolve_062719.sh
+#
 #Name: 02_3dDeconvolve_062719.sh
 #Author:Maria and Julia
 #Date: 4/19/19
 #Purpose: use 3dDeconvolve to model timecourses from saccade tasks
+#
 # 20200306WF - updated to use lunaid_date instead of just lunaid in subjlist
+
+# use DRYRUN to echo deconvolve instead of actually running
+# will still mess with regressor and 1D files
+env |grep -q "^DRYRUN=" && DRYRUN=echo || DYRUN=""
 
 workdir=/Volumes/Zeus/Orma/7T_MGS/data
 datadir=/Volumes/Zeus/preproc/7TBrainMech_mgsencmem/MHTask_nost
@@ -28,7 +37,7 @@ for s in `cat $subjlist`; do
    cat ${regs[@]} > $workdir/$ld8/${ld8}_nuisance_regressors.txt
 
    # check 1D files
-   for tfile in $s/${ld8}_{cue,delay,resp}.1D; do
+   for tfile in $workdir/$s/${ld8}_{cue,delay,resp}.1D; do
       [ ! -r $tfile ] && echo "ERR: $ld8 missing timing file $tfile" && continue 2
 
       # TODO: find missing runs. remove lines with sed
@@ -70,7 +79,7 @@ for s in `cat $subjlist`; do
    #    sed -ie '3s/.*/\*/' $s/"$ld8"_resp.1D
    # fi
    cd $s
-    3dDeconvolve \
+   $DRYRUN 3dDeconvolve \
     -input $run1 $run2 $run3 \
     -polort 3 \
     -jobs 12 \
