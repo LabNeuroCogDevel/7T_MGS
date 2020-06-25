@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # USAGE:
-#  ./02_3dDeconvolve_062719.sh
-#  DRYRUN=1 ./02_3dDeconvolve_062719.sh
+#  ./02_3dDeconvolve_062719.sh "subjlist"
+#  DRYRUN=1 ./02_3dDeconvolve_062719.sh "subjlist"
+#
+# N.B. "subjlist" tells script to use txt file subject list
+#     stored in file "subjects_051920.txt"
+#     to run just one subject use e.g.
+#        ./02... 10129_20180917
 #
 #Name: 02_3dDeconvolve_062719.sh
 #Author:Maria and Julia
@@ -19,10 +24,26 @@ fd_thres=0.5 # censor file creation. what is upper limit for FD motion
 dpfix=cenfd${fd_thres} # where to save bucket file output
 workdir=/Volumes/Zeus/Orma/7T_MGS/data
 datadir=/Volumes/Zeus/preproc/7TBrainMech_mgsencmem/MHTask_nost
-subjlist="$workdir/subjects_03062020.txt"
-[ ! -r $subjlist ] && echo "DNE: $subjlist" && exit 1
-for s in `cat $subjlist`; do
+[ $# -lt 1 ] && echo "USAGE: $0 'subjlist'   OR $0 ld8 [ld8 ld8]" && exit 1
+if [ "$1" == "subjlist" ]; then
+   subjlist="subjects_051920.txt"
+   [ ! -r $subjlist ] && echo "DNE: $subjlist" && exit 1
+   allsubjs=(`cat $subjlist`)
+else
+   allsubjs=("$@")
+fi
+
+# 20200624 - debug missing task files
+showraw() {
+   ld8="$1"
+   id=${ld8##_*}
+   vdate=${ld8%%_*}
+   ls -d /Volumes/Hera/Raw/BIDS/7TBrainMech/rawlinks/$ld8/*MGS* \
+      /Volumes/Hera/Raw/BIDS/7TBrainMech/sub-$id/$vdate/func/sub-*_task-MGS*nii.gz 2>/dev/null|sed 's/^/\t/g'
+}
+for s in ${allsubjs[@]}; do
    ld8=$(basename $s)
+   echo $datadir/$ld8
    test ! -d $workdir/$s  && echo "ERR: no dir $_" && continue
 
    # skip if doesn't exist
@@ -34,7 +55,18 @@ for s in `cat $subjlist`; do
    regs=($datadir/${ld8}/0[0-9]/nuisance_regressors.txt)
    nruns=${#runs[@]}
    # TODO: don't have to stop if less than 3 runs. could continue. first pass: only take full
-   [ $nruns -lt 3 ] && echo "ERR: $ld8 has $nruns != 4 runs [TODO: allow continue] (${runs[@]})" && continue
+   minrun=2
+   if [ $nruns -lt $minrun ]; then
+      echo "ERR: $ld8 has too few runs: $nruns < $minrun min runs."
+      echo -ne " preproc files:\n\t"
+      echo "${runs[@]}"|sed 's/ /\n\t/g'||:
+      echo -ne " raw files:\n\t"
+      showraw $ld8||:
+      echo " consider parsing and preprocing data (when raw but not preproc) "
+      echo "   cd /Volumes/Hera/Projects/7TBrainMech/scripts/mri/BIDS; ./02_mkBIDS.R /Volumes/Hera/Raw/BIDS/7TBrainMech/rawlinks/$ld8"
+      echo "   pp 7TBrainMech_mgsencmem MHTask_nost $ld8"
+      continue
+   fi
    [ $nruns != ${#regs[@]} ] && echo "ERR: $ld8 has $nruns and ${#regs[@]} reg files (${regs[@]})" && continue
 
    # write all regs to one place
@@ -59,7 +91,7 @@ for s in `cat $subjlist`; do
 
       # check 1D count matches number of runs
       n1Druns=$(sed '/^\*$/d' $tfile |wc -l) 
-      [ $n1Druns -ne $nruns ]  && echo "ERR: $ld8 $tfile has $n1Druns != $nruns runs" && continue 2
+      [ $n1Druns -ne $nruns ]  && echo "ERR: $ld8 $tfile has $n1Druns != $nruns preproced runs (${runs[@]})" && continue 2
    done
    
    cd $workdir/$s
