@@ -1,11 +1,14 @@
 #!/usr/bin/env Rscript
 
 #
+# model mrsi metabolite concentrations with MR task GLM betas
 #
-
 # 20200806WF - init
+
+# libraries
 library(dplyr)
 library(ggplot2)
+library(tidyr)
 theme_set(cowplot::theme_cowplot())
 
 
@@ -33,6 +36,7 @@ plotme <- function(d) ggplot(d) + aes(x=age, y=beta) + geom_point(aes(color=gend
 ####
 
 # get data, merge with age, make invage and age2
+setwd('/Volumes/Zeus/Orma/7T_MGS/scripts')
 d <- read.csv('../group_contrasts/resp_beta_clust_spheres_08042020.txt') %>%
    merge(read.table('scan_IDs_ages.txt', header=T), by="subj", all.x=T) %>%
    mutate(invage=1/age, age2=age**2)
@@ -78,9 +82,13 @@ print(mr_sig_plt)
 #####
 ## again for MRSI
 ####
-library(tidyr)
+
+# settings
 si_zthres <- 3
-source('/Volumes/Hera/Projects/7TBrainMech/scripts/mri/MRSI_roi/mrsi_r/R/mrsi_fitdf.R')
+MDL_FML_ALL <- list(lin=beta~age*mrsi+gender,
+                     inv=beta~invage*mrsi+gender,
+                     quad=beta~age2*mrsi+age*mrsi+gender) # 2 interactions is too many?
+
 ## reshape data to be more amenable to modeling
 #  row per ld8+si_roi+metabolite. value is "mrsi"
 #   additional "fd" (per ld8), "GM" (per ld8+roi), and "SD"(per row) values
@@ -116,22 +124,18 @@ si_clean <- si_all %>%
 
 
 # every mr_roi to every si voxel
+# row for every visit for every mr roi for every mrsi roi for every metabolite
 beta_si <- merge(beta_clean, si_clean, by.x="subj",by.y="ld8") # 508,116 rows
 
-# TODO: pull in mrsi data
- MDL_FML_ALL <- list(lin=beta~age*mrsi+gender,
-                     inv=beta~invage*mrsi+gender,
-                     quad=beta~age2*mrsi+age*mrsi+gender) # 2 interactions is too many?
-
 ### EXAMPLE on just Glu for mr roi 1  and si_roi 1
-# try on just one
-si_model_Glu1 <- beta_si %>%
-    filter(roi==1, si_roi==1, metabolite=="Glu") %>%
-    mk_models(MDL_FML_ALL)
-# run this subset through all our models
-Glu1Best <- best_model(si_model_Glu1, MDL_FML_ALL)
-# find the best one
-si_model_Glu1[Glu1Best]
+# # try on just one
+# si_model_Glu1 <- beta_si %>%
+#     filter(roi=='delay_roi1', si_roi==1, metabolite=="Glu") %>%
+#     mk_models(MDL_FML_ALL)
+# # run this subset through all our models
+# Glu1Best <- best_model(si_model_Glu1, MDL_FML_ALL) # lin
+# # find the best one
+# si_model_Glu1[Glu1Best] # model at delay_roi1/si_roi1 for lin
 
 ## GIANT MODEL LIST
 #  a model for each mr_roi, si_roi, and metabolite pairing
@@ -141,11 +145,48 @@ beta_si_models <- beta_si %>%
     Filter(function(x) nrow(x) > 10, .) %>%
     lapply(mk_models, MDL_FML_ALL) 
 si_best <- sapply(beta_si_models, best_model, MDL_FML_ALL)
-# # TODO: check coef matrix
-   expl1_models <- beta_si_models[[1]]
-   lapply(expl1_models, summary)
-   expl1_i     <- si_best[[1]]
-   summary(expl1_models[[expl1_i]])
-# TODO: is idx=2 always the correct p-value in summary coeff matrix
-  si_pval <- mapply(function(m,i) summary(m[[i]])$coef[2,'Pr(>|t|)'], beta_si_models, si_best)
 
+# # # TODO: check coef matrix
+#    expl1_models <- beta_si_models[[1]]
+#    lapply(expl1_models, summary)
+#    expl1_i     <- si_best[[1]]
+#    summary(expl1_models[[expl1_i]])
+# # TODO: is idx=2 always the correct p-value in summary coeff matrix
+#   si_pval <- mapply(function(m,i) summary(m[[i]])$coef[2,'Pr(>|t|)'], beta_si_models, si_best)
+
+
+
+# extract the best of the 3 models we generated for each combo
+best_model_per_combo <- mapply(function(this_model, which_best) this_model[[which_best]], beta_si_models, si_best)
+# extact pvalue of all the best models
+all_pvals <- sapply(best_model_per_combo, function(m) summary(m)$coef[2,'Pr(>|t|)'])
+# remove insig. and keep only combos with Glu and GABA
+keep_idx <-  grepl("Glu|GABA",names(best_model_per_combo)) & all_pvals < 0.05
+modelsOfInterest <- best_model_per_combo[keep_idx]
+
+pdf("txt/beta_mrsi_GluGABA_sig05.pdf")
+for(mi in 1:length(modelsOfInterest)) {
+  m <- modelsOfInterest[[mi]]
+  what <- names(modelsOfInterest)[[mi]]
+  pval <- summary(m)$coef[2,'Pr(>|t|)']
+  d <- m$model
+
+  # interp
+  mrsi_grid <- seq(min(d$mrsi),max(d$mrsi), by=.01)
+  refat <- list(mrsi=mrsi_grid, gender=c("M","F"))
+  fitdf <- emmeans::ref_grid(m, at=refat) %>% as.data.frame
+  fitdf$beta <- fitdf$prediction
+
+  mtype <- 'lin'
+  if('invage' %in% names(d)) mtype <-'inv'#fitdf$age <- 1/fitdf$invage
+  if('age2' %in% names(d)) mtype <-'quad'#fitdf$age <- 1/fitdf$invage
+
+  d$beta_fit <- m$fitted.values
+  p <- ggplot(d) + aes(x=mrsi, y=beta, color=gender) +
+      geom_point() +
+      geom_line(data=fitdf) +
+      ggtitle(paste(what, mtype, pval, sep=" "))
+  print(p)
+  # grid::grid.newpage() # print makes it's own new page
+}
+dev.off()
