@@ -37,7 +37,7 @@ d <- read.csv('../group_contrasts/resp_beta_clust_spheres_08042020.txt') %>%
 beta_clean <- d %>%
    group_by(roi) %>%
    mutate(zscore=scale(beta, center=T, scale=T)) %>%
-   filter(zscore <= z_thres) %>% ungroup
+   filter(abs(zscore) <= z_thres) %>% ungroup
 write.csv(beta_clean, 'txt/MR_beta_clean_resp.csv')
 
 

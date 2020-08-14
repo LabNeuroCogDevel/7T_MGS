@@ -40,7 +40,7 @@ si_all <-si_mtbl %>% inner_join(fd) %>% inner_join(gm)
 si_clean <- si_all %>%
     group_by(si_label, metabolite) %>% # for each roi/metabolite pair
     filter(SD < 20,
-           scale(mrsi, center=T, scale=T) <= si_zthres,
+           abs(scale(mrsi, center=T, scale=T)) <= si_zthres,
            !is.na(GMrat))
 
 write.csv(si_clean, 'txt/MRSI_clean_long.csv')
